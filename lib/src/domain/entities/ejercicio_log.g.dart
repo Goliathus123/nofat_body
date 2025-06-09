@@ -10,6 +10,7 @@ EjercicioLog _$EjercicioLogFromJson(Map<String, dynamic> json) => EjercicioLog(
   nombre: json['nombre'] as String,
   series: (json['series'] as num).toInt(),
   repeticiones: (json['repeticiones'] as num).toInt(),
+  completado: json['completado'] as bool? ?? false,
 );
 
 Map<String, dynamic> _$EjercicioLogToJson(EjercicioLog instance) =>
@@ -17,4 +18,5 @@ Map<String, dynamic> _$EjercicioLogToJson(EjercicioLog instance) =>
       'nombre': instance.nombre,
       'series': instance.series,
       'repeticiones': instance.repeticiones,
+      'completado': instance.completado,
     };

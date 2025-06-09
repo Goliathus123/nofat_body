@@ -2,57 +2,58 @@
 
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../../domain/entities/ejercicio_log.dart';
+import '../../domain/entities/rutina_diaria.dart';
 import '../../domain/entities/consumo_calorico.dart';
 
 class LocalStorageRepository {
-  // Claves para guardar los datos en SharedPreferences
-  static const String _ejerciciosKey = 'lista_ejercicios';
+  // Clave para las rutinas (v2 para el nuevo formato por fecha)
+  static const String _rutinasKey = 'todas_las_rutinas_v2';
+  // Clave para los consumos de calorías
   static const String _consumosKey = 'lista_consumos';
 
-  // --- Métodos para Ejercicios ---
+  // --- MÉTODOS PARA RUTINAS POR FECHA (YA EXISTENTES) ---
 
-  Future<void> guardarEjercicios(List<EjercicioLog> ejercicios) async {
+  Future<void> guardarTodasLasRutinas(Map<String, RutinaDiaria> rutinas) async {
     final prefs = await SharedPreferences.getInstance();
-    // 1. Convierte la lista de objetos a una lista de Mapas (usando toJson)
-    final List<Map<String, dynamic>> data = ejercicios
-        .map((e) => e.toJson())
-        .toList();
-    // 2. Convierte la lista de Mapas a un String en formato JSON
-    final String jsonString = jsonEncode(data);
-    // 3. Guarda el String
-    await prefs.setString(_ejerciciosKey, jsonString);
+    final Map<String, dynamic> data = rutinas.map(
+      (key, value) => MapEntry(key, value.toJson()),
+    );
+    await prefs.setString(_rutinasKey, jsonEncode(data));
   }
 
-  Future<List<EjercicioLog>> cargarEjercicios() async {
+  Future<Map<String, RutinaDiaria>> cargarTodasLasRutinas() async {
     final prefs = await SharedPreferences.getInstance();
-    final String? jsonString = prefs.getString(_ejerciciosKey);
-
-    if (jsonString == null) {
-      return []; // Devuelve una lista vacía si no hay nada guardado
-    }
-
-    // 1. Convierte el String JSON a una lista de Mapas
-    final List<dynamic> data = jsonDecode(jsonString);
-    // 2. Convierte la lista de Mapas a una lista de objetos (usando fromJson)
-    return data.map((json) => EjercicioLog.fromJson(json)).toList();
+    final String? jsonString = prefs.getString(_rutinasKey);
+    if (jsonString == null) return {};
+    final Map<String, dynamic> data = jsonDecode(jsonString);
+    return data.map(
+      (key, value) => MapEntry(key, RutinaDiaria.fromJson(value)),
+    );
   }
 
-  // --- Métodos para Consumo de Calorías ---
+  // --- MÉTODOS PARA CONSUMO DE CALORÍAS (RESTAURADOS) ---
 
+  /// Guarda la lista de consumos calóricos.
   Future<void> guardarConsumos(List<ConsumoCalorico> consumos) async {
     final prefs = await SharedPreferences.getInstance();
+    // Convierte la lista de objetos a una lista de Mapas
     final List<Map<String, dynamic>> data = consumos
         .map((e) => e.toJson())
         .toList();
+    // Convierte la lista a un String JSON y lo guarda.
     await prefs.setString(_consumosKey, jsonEncode(data));
   }
 
+  /// Carga la lista de consumos calóricos.
   Future<List<ConsumoCalorico>> cargarConsumos() async {
     final prefs = await SharedPreferences.getInstance();
     final String? jsonString = prefs.getString(_consumosKey);
-    if (jsonString == null) return [];
+    if (jsonString == null) {
+      return []; // Si no hay datos, devuelve una lista vacía.
+    }
+    // Decodifica el String JSON a una lista
     final List<dynamic> data = jsonDecode(jsonString);
+    // Convierte cada elemento de la lista de vuelta a un objeto ConsumoCalorico.
     return data.map((json) => ConsumoCalorico.fromJson(json)).toList();
   }
 }

@@ -1,10 +1,15 @@
+// lib/src/presentation/features/registro_rutina/screens/registro_rutina_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../../../../data/repositories/local_storage_repository.dart'; // Importa el repositorio
-import '../../../../domain/entities/ejercicio_definicion.dart';
-import '../../../../domain/entities/ejercicio_log.dart';
-import '../../biblioteca_ejercicios/screens/biblioteca_screen.dart';
-import '../../registro_calorias/screens/calorias_screen.dart';
+import 'package:intl/intl.dart';
+import 'package:nofat_body/src/data/repositories/local_storage_repository.dart';
+import 'package:nofat_body/src/domain/entities/ejercicio_definicion.dart';
+import 'package:nofat_body/src/domain/entities/ejercicio_log.dart';
+import 'package:nofat_body/src/domain/entities/rutina_diaria.dart';
+import 'package:nofat_body/src/presentation/features/biblioteca_ejercicios/screens/biblioteca_screen.dart';
+import 'package:nofat_body/src/presentation/features/registro_calorias/screens/calorias_screen.dart';
+import 'package:nofat_body/src/presentation/features/workout_session/screens/workout_session_screen.dart';
 
 class RegistroRutinaScreen extends StatefulWidget {
   const RegistroRutinaScreen({super.key});
@@ -14,35 +19,84 @@ class RegistroRutinaScreen extends StatefulWidget {
 }
 
 class _RegistroRutinaScreenState extends State<RegistroRutinaScreen> {
-  final List<EjercicioLog> _ejerciciosDelDia = [];
-  // --- LÓGICA DE PERSISTENCIA ---
-  // 1. Instancia del repositorio que se encargará de la comunicación con el almacenamiento.
   final LocalStorageRepository _repository = LocalStorageRepository();
+  DateTime _fechaSeleccionada = DateTime.now();
+  Map<String, RutinaDiaria> _todasLasRutinas = {};
+
+  RutinaDiaria get _rutinaDelDiaSeleccionado =>
+      _todasLasRutinas[_fechaComoString(_fechaSeleccionada)] ??
+      RutinaDiaria(ejercicios: []);
 
   @override
   void initState() {
     super.initState();
-    // --- LÓGICA DE PERSISTENCIA ---
-    // 2. Llamamos al método para cargar los datos guardados en cuanto la pantalla se inicia.
-    _cargarEjercicios();
+    _cargarTodasLasRutinas();
   }
 
-  /// Carga los ejercicios desde el almacenamiento local y actualiza el estado.
-  void _cargarEjercicios() async {
-    final ejerciciosGuardados = await _repository.cargarEjercicios();
-    // Usamos setState para redibujar la pantalla con los datos cargados.
-    setState(() {
-      _ejerciciosDelDia.clear(); // Limpiamos la lista por si acaso
-      _ejerciciosDelDia.addAll(ejerciciosGuardados);
-    });
+  String _fechaComoString(DateTime fecha) =>
+      DateFormat('yyyy-MM-dd').format(fecha);
+
+  void _cargarTodasLasRutinas() async {
+    final rutinasGuardadas = await _repository.cargarTodasLasRutinas();
+    if (mounted) {
+      setState(() => _todasLasRutinas = rutinasGuardadas);
+    }
   }
 
-  /// Guarda la lista actual de ejercicios en el almacenamiento local.
-  void _guardarEjercicios() {
-    _repository.guardarEjercicios(_ejerciciosDelDia);
+  Future<void> _guardarYRerefrescar() async {
+    await _repository.guardarTodasLasRutinas(_todasLasRutinas);
   }
 
-  void _mostrarDialogoAgregarEjercicio() async {
+  void _seleccionarFecha(BuildContext context) async {
+    final DateTime? nuevaFecha = await showDatePicker(
+      context: context,
+      initialDate: _fechaSeleccionada,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+      locale: const Locale('es', 'ES'),
+    );
+    if (nuevaFecha != null) {
+      setState(() => _fechaSeleccionada = nuevaFecha);
+    }
+  }
+
+  void _iniciarRutina() async {
+    final rutinaDelDia = _rutinaDelDiaSeleccionado;
+    if (rutinaDelDia.ejercicios.isEmpty) return;
+
+    final List<EjercicioLog>? ejerciciosActualizados =
+        await Navigator.push<List<EjercicioLog>>(
+          context,
+          MaterialPageRoute(
+            builder: (context) =>
+                WorkoutSessionScreen(rutinaInicial: rutinaDelDia.ejercicios),
+          ),
+        );
+
+    if (ejerciciosActualizados != null && mounted) {
+      final bool todosCompletados = ejerciciosActualizados.every(
+        (e) => e.completado,
+      );
+
+      setState(() {
+        final rutinaModificada =
+            _todasLasRutinas[_fechaComoString(_fechaSeleccionada)] ??
+            RutinaDiaria(ejercicios: []);
+        rutinaModificada.ejercicios.clear();
+        rutinaModificada.ejercicios.addAll(ejerciciosActualizados);
+        rutinaModificada.completada = todosCompletados;
+        _todasLasRutinas[_fechaComoString(_fechaSeleccionada)] =
+            rutinaModificada;
+      });
+      _guardarYRerefrescar();
+    }
+  }
+
+  void _accionCrearOAnadir() {
+    _mostrarDialogoAgregarEjercicio();
+  }
+
+  void _mostrarDialogoAgregarEjercicio() {
     final nombreController = TextEditingController();
     final seriesController = TextEditingController();
     final repeticionesController = TextEditingController();
@@ -60,10 +114,9 @@ class _RegistroRutinaScreenState extends State<RegistroRutinaScreen> {
 
     showDialog(
       context: context,
-      barrierDismissible: false,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: const Text('Añadir Nuevo Ejercicio'),
+          title: const Text('Añadir Ejercicio'),
           content: Form(
             key: formKey,
             child: SingleChildScrollView(
@@ -75,16 +128,16 @@ class _RegistroRutinaScreenState extends State<RegistroRutinaScreen> {
                     decoration: const InputDecoration(
                       labelText: 'Nombre del Ejercicio',
                     ),
-                    validator: (value) =>
-                        (value == null || value.trim().isEmpty)
-                        ? 'Campo requerido'
-                        : null,
+                    validator: (v) =>
+                        v == null || v.isEmpty ? 'Requerido' : null,
                   ),
                   const SizedBox(height: 8),
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.menu_book),
-                    label: const Text("Elegir de la Biblioteca"),
-                    onPressed: _seleccionarDeLaBiblioteca,
+                  Center(
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.menu_book),
+                      label: const Text("Elegir de la Biblioteca"),
+                      onPressed: _seleccionarDeLaBiblioteca,
+                    ),
                   ),
                   const SizedBox(height: 16),
                   TextFormField(
@@ -94,9 +147,8 @@ class _RegistroRutinaScreenState extends State<RegistroRutinaScreen> {
                     ),
                     keyboardType: TextInputType.number,
                     inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    validator: (value) => (value == null || value.isEmpty)
-                        ? 'Campo requerido'
-                        : null,
+                    validator: (v) =>
+                        v == null || v.isEmpty ? 'Requerido' : null,
                   ),
                   const SizedBox(height: 16),
                   TextFormField(
@@ -106,9 +158,8 @@ class _RegistroRutinaScreenState extends State<RegistroRutinaScreen> {
                     ),
                     keyboardType: TextInputType.number,
                     inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    validator: (value) => (value == null || value.isEmpty)
-                        ? 'Campo requerido'
-                        : null,
+                    validator: (v) =>
+                        v == null || v.isEmpty ? 'Requerido' : null,
                   ),
                 ],
               ),
@@ -122,23 +173,22 @@ class _RegistroRutinaScreenState extends State<RegistroRutinaScreen> {
             ElevatedButton(
               child: const Text('Guardar'),
               onPressed: () {
-                if (formKey.currentState!.validate()) {
+                if (formKey.currentState?.validate() ?? false) {
                   final nuevoEjercicio = EjercicioLog(
                     nombre: nombreController.text,
                     series: int.tryParse(seriesController.text) ?? 0,
                     repeticiones:
                         int.tryParse(repeticionesController.text) ?? 0,
                   );
-
                   setState(() {
-                    _ejerciciosDelDia.add(nuevoEjercicio);
+                    final rutinaActual = _rutinaDelDiaSeleccionado;
+                    rutinaActual.ejercicios.add(nuevoEjercicio);
+                    // Si la rutina estaba completada, al añadir un nuevo ejercicio, deja de estarlo.
+                    rutinaActual.completada = false;
+                    _todasLasRutinas[_fechaComoString(_fechaSeleccionada)] =
+                        rutinaActual;
                   });
-
-                  // --- LÓGICA DE PERSISTENCIA ---
-                  // 3. ¡ACCIÓN CLAVE DE GUARDADO!
-                  // Justo después de añadir un ejercicio a la lista, guardamos la lista completa.
-                  _guardarEjercicios();
-
+                  _guardarYRerefrescar();
                   Navigator.of(context).pop();
                 }
               },
@@ -151,57 +201,172 @@ class _RegistroRutinaScreenState extends State<RegistroRutinaScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // El método build se mantiene exactamente igual que antes.
+    final rutinaDelDia = _rutinaDelDiaSeleccionado;
+    final hayRutina = rutinaDelDia.ejercicios.isNotEmpty;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Rutina de Hoy'),
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        title: GestureDetector(
+          onTap: () => _seleccionarFecha(context),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.calendar_today, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                DateFormat(
+                  'd \'de\' MMMM, yyyy',
+                  'es_ES',
+                ).format(_fechaSeleccionada),
+              ),
+            ],
+          ),
+        ),
+        centerTitle: true,
         actions: [
           IconButton(
             icon: const Icon(Icons.calculate_outlined),
             tooltip: 'Ir a Calorías',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const CaloriasScreen()),
-              );
-            },
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const CaloriasScreen()),
+            ),
           ),
         ],
       ),
-      body: _ejerciciosDelDia.isEmpty
-          ? const Center(
-              child: Text(
-                'Aún no has registrado ejercicios.',
-                style: TextStyle(color: Colors.grey),
+      body: Stack(
+        children: [
+          hayRutina
+              ? ListView.builder(
+                  padding: const EdgeInsets.only(bottom: 80),
+                  itemCount: rutinaDelDia.ejercicios.length,
+                  itemBuilder: (context, index) {
+                    final ejercicio = rutinaDelDia.ejercicios[index];
+                    return Card(
+                      margin: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      child: ListTile(
+                        leading: CircleAvatar(child: Text('${index + 1}')),
+                        title: Text(
+                          ejercicio.nombre,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        subtitle: Text(
+                          'Series: ${ejercicio.series} - Repeticiones: ${ejercicio.repeticiones}',
+                        ),
+                      ),
+                    );
+                  },
+                )
+              : const Center(
+                  child: Text(
+                    'No hay rutina programada para este día.',
+                    style: TextStyle(color: Colors.grey, fontSize: 16),
+                  ),
+                ),
+          if (hayRutina && rutinaDelDia.completada)
+            Positioned.fill(
+              child: Container(
+                color: Colors.green.withOpacity(0.2),
+                child: Center(
+                  child: Transform.rotate(
+                    angle: -0.4,
+                    child: Text(
+                      'COMPLETADA',
+                      style: TextStyle(
+                        fontSize: 52,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white.withOpacity(0.4),
+                      ),
+                    ),
+                  ),
+                ),
               ),
-            )
-          : ListView.builder(
-              itemCount: _ejerciciosDelDia.length,
-              itemBuilder: (context, index) {
-                final ejercicio = _ejerciciosDelDia[index];
-                return Card(
-                  margin: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
-                  ),
-                  child: ListTile(
-                    leading: CircleAvatar(child: Text('${index + 1}')),
-                    title: Text(
-                      ejercicio.nombre,
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    subtitle: Text(
-                      'Series: ${ejercicio.series} - Repeticiones: ${ejercicio.repeticiones}',
-                    ),
-                  ),
-                );
-              },
             ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _mostrarDialogoAgregarEjercicio,
-        tooltip: 'Añadir Ejercicio',
-        child: const Icon(Icons.add),
+        ],
+      ),
+      bottomNavigationBar: BottomAppBar(
+        child: Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: _buildBottomButtons(hayRutina, rutinaDelDia.completada),
+        ),
       ),
     );
+  }
+
+  Widget _buildBottomButtons(bool hayRutina, bool estaCompletada) {
+    if (!hayRutina) {
+      return Row(
+        children: [
+          Expanded(
+            child: ElevatedButton.icon(
+              icon: const Icon(Icons.add),
+              label: const Text('CREAR RUTINA'),
+              onPressed: _accionCrearOAnadir,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.primary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+          ),
+        ],
+      );
+    } else if (hayRutina && !estaCompletada) {
+      return Row(
+        children: [
+          Expanded(
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.add_task),
+              label: const Text('AÑADIR EJER.'),
+              onPressed: _accionCrearOAnadir,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: ElevatedButton.icon(
+              icon: const Icon(Icons.play_arrow),
+              label: const Text('INICIAR'),
+              onPressed: _iniciarRutina,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+          ),
+        ],
+      );
+    } else {
+      // Rutina completada
+      return Row(
+        children: [
+          Expanded(
+            child: Text(
+              'Rutina completada',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.green,
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.edit),
+              label: const Text('MODIFICAR'),
+              onPressed: _accionCrearOAnadir,
+            ),
+          ),
+        ],
+      );
+    }
   }
 }
