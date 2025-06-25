@@ -102,7 +102,7 @@ class _RegistroRutinaScreenState extends State<RegistroRutinaScreen> {
     final repeticionesController = TextEditingController();
     final formKey = GlobalKey<FormState>();
 
-    void _seleccionarDeLaBiblioteca() async {
+    void seleccionarDeLaBiblioteca() async {
       final resultado = await Navigator.push<EjercicioDefinicion>(
         context,
         MaterialPageRoute(builder: (context) => const BibliotecaScreen()),
@@ -136,7 +136,7 @@ class _RegistroRutinaScreenState extends State<RegistroRutinaScreen> {
                     child: ElevatedButton.icon(
                       icon: const Icon(Icons.menu_book),
                       label: const Text("Elegir de la Biblioteca"),
-                      onPressed: _seleccionarDeLaBiblioteca,
+                      onPressed: seleccionarDeLaBiblioteca,
                     ),
                   ),
                   const SizedBox(height: 16),

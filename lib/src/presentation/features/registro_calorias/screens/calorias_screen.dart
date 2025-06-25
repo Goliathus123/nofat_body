@@ -1,8 +1,11 @@
+// lib/src/presentation/features/registro_calorias/screens/calorias_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
-import '../../../../data/repositories/local_storage_repository.dart'; // Importa el repositorio
-import '../../../../domain/entities/consumo_calorico.dart';
+import 'package:nofat_body/src/data/repositories/local_storage_repository.dart';
+import 'package:nofat_body/src/domain/entities/consumo_calorico.dart';
+import 'package:nofat_body/src/presentation/features/analytics/screens/calorias_chart_screen.dart';
 
 class CaloriasScreen extends StatefulWidget {
   const CaloriasScreen({super.key});
@@ -12,32 +15,51 @@ class CaloriasScreen extends StatefulWidget {
 }
 
 class _CaloriasScreenState extends State<CaloriasScreen> {
-  final List<ConsumoCalorico> _consumosDelDia = [];
-  // --- LÓGICA DE PERSISTENCIA ---
   final LocalStorageRepository _repository = LocalStorageRepository();
-  final int _caloriasGastadas = 750;
+  DateTime _fechaSeleccionada = DateTime.now();
+  Map<String, List<ConsumoCalorico>> _todosLosConsumos = {};
 
-  int get _caloriasConsumidas =>
-      _consumosDelDia.fold(0, (sum, item) => sum + item.calorias);
-  int get _balanceCalorico => _caloriasConsumidas - _caloriasGastadas;
+  // Getters para cálculos automáticos
+  List<ConsumoCalorico> get _consumosDelDiaSeleccionado =>
+      _todosLosConsumos[_fechaComoString(_fechaSeleccionada)] ?? [];
+  int get _caloriasConsumidasDelDia =>
+      _consumosDelDiaSeleccionado.fold(0, (sum, item) => sum + item.calorias);
+  final int _caloriasGastadasFijas =
+      750; // Este valor sigue siendo fijo por ahora
+  int get _balanceCalorico =>
+      _caloriasConsumidasDelDia - _caloriasGastadasFijas;
 
   @override
   void initState() {
     super.initState();
-    // --- LÓGICA DE PERSISTENCIA ---
-    _cargarConsumos();
+    _cargarTodosLosConsumos();
   }
 
-  void _cargarConsumos() async {
-    final consumosGuardados = await _repository.cargarConsumos();
-    setState(() {
-      _consumosDelDia.clear();
-      _consumosDelDia.addAll(consumosGuardados);
-    });
+  String _fechaComoString(DateTime fecha) =>
+      DateFormat('yyyy-MM-dd').format(fecha);
+
+  void _cargarTodosLosConsumos() async {
+    final consumosGuardados = await _repository.cargarTodosLosConsumos();
+    if (mounted) {
+      setState(() => _todosLosConsumos = consumosGuardados);
+    }
   }
 
-  void _guardarConsumos() {
-    _repository.guardarConsumos(_consumosDelDia);
+  Future<void> _guardarConsumos() async {
+    await _repository.guardarTodosLosConsumos(_todosLosConsumos);
+  }
+
+  void _seleccionarFecha(BuildContext context) async {
+    final DateTime? nuevaFecha = await showDatePicker(
+      context: context,
+      initialDate: _fechaSeleccionada,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+      locale: const Locale('es', 'ES'),
+    );
+    if (nuevaFecha != null) {
+      setState(() => _fechaSeleccionada = nuevaFecha);
+    }
   }
 
   void _mostrarDialogoAgregarConsumo() {
@@ -57,8 +79,11 @@ class _CaloriasScreenState extends State<CaloriasScreen> {
               children: [
                 TextFormField(
                   controller: descripcionController,
-                  decoration: const InputDecoration(labelText: 'Descripción'),
-                  validator: (value) => (value == null || value.isEmpty)
+                  decoration: const InputDecoration(
+                    labelText: 'Descripción',
+                    hintText: 'Ej: Almuerzo...',
+                  ),
+                  validator: (value) => (value == null || value.trim().isEmpty)
                       ? 'Campo requerido'
                       : null,
                 ),
@@ -83,21 +108,27 @@ class _CaloriasScreenState extends State<CaloriasScreen> {
             ),
             ElevatedButton(
               onPressed: () {
-                if (formKey.currentState!.validate()) {
+                if (formKey.currentState?.validate() ?? false) {
                   final nuevoConsumo = ConsumoCalorico(
                     id: DateTime.now().toIso8601String(),
                     descripcion: descripcionController.text,
                     calorias: int.tryParse(caloriasController.text) ?? 0,
-                    fecha: DateTime.now(),
+                    fecha: _fechaSeleccionada, // Usamos la fecha seleccionada
                   );
+
                   setState(() {
-                    _consumosDelDia.add(nuevoConsumo);
+                    // Obtenemos la lista actual para la fecha, o una nueva si no existe
+                    final consumosActuales = List<ConsumoCalorico>.from(
+                      _consumosDelDiaSeleccionado,
+                    );
+                    consumosActuales.add(nuevoConsumo);
+                    // Actualizamos el mapa principal con la nueva lista de consumos
+                    _todosLosConsumos[_fechaComoString(_fechaSeleccionada)] =
+                        consumosActuales;
                   });
 
-                  // --- LÓGICA DE PERSISTENCIA ---
-                  // ¡ACCIÓN CLAVE DE GUARDADO!
+                  // Guardamos el mapa completo en el almacenamiento local
                   _guardarConsumos();
-
                   Navigator.of(context).pop();
                 }
               },
@@ -111,9 +142,42 @@ class _CaloriasScreenState extends State<CaloriasScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // El método build se mantiene exactamente igual que antes.
     return Scaffold(
-      appBar: AppBar(title: const Text('Registro de Calorías')),
+      appBar: AppBar(
+        title: GestureDetector(
+          onTap: () => _seleccionarFecha(context),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.calendar_today, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                DateFormat(
+                  'd \'de\' MMMM, yyyy',
+                  'es_ES',
+                ).format(_fechaSeleccionada),
+              ),
+            ],
+          ),
+        ),
+        centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.bar_chart),
+            tooltip: 'Ver Gráfico de Consumo',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                      CaloriasChartScreen(todosLosConsumos: _todosLosConsumos),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+      // --- CUERPO DE LA PANTALLA RECONSTRUIDO ---
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -121,32 +185,24 @@ class _CaloriasScreenState extends State<CaloriasScreen> {
           children: [
             _buildResumenCard(),
             const SizedBox(height: 24),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Consumo Diario',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                IconButton(
-                  icon: const Icon(
-                    Icons.add_circle,
-                    color: Colors.green,
-                    size: 30,
-                  ),
-                  onPressed: _mostrarDialogoAgregarConsumo,
-                ),
-              ],
+            Text(
+              'Registros del Día',
+              style: Theme.of(context).textTheme.headlineSmall,
             ),
             const Divider(),
             _buildListaConsumo(),
           ],
         ),
       ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _mostrarDialogoAgregarConsumo,
+        child: const Icon(Icons.add),
+      ),
     );
   }
 
-  // Los métodos _buildResumenCard, _buildInfoColumn y _buildListaConsumo se mantienen iguales.
+  // --- WIDGETS AUXILIARES RECONSTRUIDOS ---
+
   Widget _buildResumenCard() {
     return Card(
       elevation: 4,
@@ -156,8 +212,12 @@ class _CaloriasScreenState extends State<CaloriasScreen> {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
-            _buildInfoColumn('Consumidas', _caloriasConsumidas, Colors.blue),
-            _buildInfoColumn('Gastadas', _caloriasGastadas, Colors.orange),
+            _buildInfoColumn(
+              'Consumidas',
+              _caloriasConsumidasDelDia,
+              Colors.blue,
+            ),
+            _buildInfoColumn('Gastadas', _caloriasGastadasFijas, Colors.orange),
             _buildInfoColumn(
               'Balance',
               _balanceCalorico,
@@ -188,12 +248,13 @@ class _CaloriasScreenState extends State<CaloriasScreen> {
   }
 
   Widget _buildListaConsumo() {
-    if (_consumosDelDia.isEmpty) {
+    final consumos = _consumosDelDiaSeleccionado;
+    if (consumos.isEmpty) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 40.0),
         child: Center(
           child: Text(
-            'No hay registros de consumo todavía.',
+            'No hay registros de consumo para este día.',
             style: TextStyle(color: Colors.grey),
           ),
         ),
@@ -202,10 +263,9 @@ class _CaloriasScreenState extends State<CaloriasScreen> {
     return ListView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      itemCount: _consumosDelDia.length,
+      itemCount: consumos.length,
       itemBuilder: (context, index) {
-        final consumo = _consumosDelDia[index];
-        final horaFormateada = DateFormat('hh:mm a').format(consumo.fecha);
+        final consumo = consumos[index];
         return Card(
           margin: const EdgeInsets.symmetric(vertical: 6),
           child: ListTile(
@@ -214,7 +274,7 @@ class _CaloriasScreenState extends State<CaloriasScreen> {
               color: Colors.blueAccent,
             ),
             title: Text(consumo.descripcion),
-            subtitle: Text(horaFormateada),
+            subtitle: Text(DateFormat('hh:mm a').format(consumo.fecha)),
             trailing: Text(
               '${consumo.calorias} kcal',
               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
